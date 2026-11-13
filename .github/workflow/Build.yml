@@ -1,100 +1,42 @@
-name: Build WorldRemote TV Agent APK
+name: Build TV APK
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: "wss:// address of your deployed server (or set repo variable SERVER_URL)"
+        required: false
 
 permissions:
   contents: read
 
+env:
+  SERVER_URL: ${{ github.event.inputs.server_url || vars.SERVER_URL }}
+
 jobs:
-  build:
+  tv-apk:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # Supports either:
-      # 1) Extracted project files uploaded to the repository, or
-      # 2) The project ZIP itself uploaded to the repository.
-      - name: Locate and prepare Android project
-        shell: bash
+      - uses: actions/checkout@v4
+      - name: Unzip project
+        run: unzip -q -o tv-app.zip -d src
+      - name: Check server URL
         run: |
-          set -euo pipefail
-
-          mkdir -p "$GITHUB_WORKSPACE/_project"
-
-          # If an uploaded project ZIP exists, extract it.
-          ZIP_FILE="$(find "$GITHUB_WORKSPACE" \
-            -maxdepth 3 -type f -iname '*.zip' \
-            ! -path '*/_project/*' \
-            | head -n 1 || true)"
-
-          if [ -n "$ZIP_FILE" ]; then
-            echo "Found uploaded ZIP: $ZIP_FILE"
-            unzip -q "$ZIP_FILE" -d "$GITHUB_WORKSPACE/_project"
-            SEARCH_ROOT="$GITHUB_WORKSPACE/_project"
-          else
-            echo "No project ZIP found; checking uploaded repository files."
-            SEARCH_ROOT="$GITHUB_WORKSPACE"
+          if [[ "$SERVER_URL" != wss://* ]]; then
+            echo "::warning::No SERVER_URL set, building with a placeholder. Set repo variable SERVER_URL (wss://...) and re-run before using the app."
+            echo "SERVER_URL=wss://YOUR-APP.onrender.com" >> "$GITHUB_ENV"
           fi
-
-          # Find the Android Gradle project root.
-          SETTINGS_FILE="$(find "$SEARCH_ROOT" \
-            -type f -name 'settings.gradle' \
-            ! -path '*/.gradle/*' \
-            | head -n 1 || true)"
-
-          if [ -z "$SETTINGS_FILE" ]; then
-            echo "::error::Could not find settings.gradle. Upload the WorldRemote project ZIP or its extracted contents."
-            exit 1
-          fi
-
-          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
-          echo "Android project found at: $PROJECT_DIR"
-
-          # Copy project contents to a predictable build directory.
-          mkdir -p "$GITHUB_WORKSPACE/android-project"
-          cp -a "$PROJECT_DIR/." "$GITHUB_WORKSPACE/android-project/"
-
-          # Ensure the expected app module exists.
-          if [ ! -f "$GITHUB_WORKSPACE/android-project/app/build.gradle" ]; then
-            echo "::error::app/build.gradle was not found in the Android project."
-            exit 1
-          fi
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.7" }
+      - name: Set server URL
+        run: sed -i "s|wss://YOUR-APP.onrender.com|$SERVER_URL|" src/app/src/main/java/com/example/tvagent/Agent.kt
+      - name: Build TV APK
+        run: gradle -p src assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
         with:
-          distribution: temurin
-          java-version: '17'
-          cache: gradle
-
-      - name: Set up Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-
-      - name: Build debug APK
-        working-directory: android-project
-        run: gradle --no-daemon assembleDebug
-
-      - name: Verify APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK="android-project/app/build/outputs/apk/debug/app-debug.apk"
-          test -f "$APK"
-          ls -lh "$APK"
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: WorldRemote-TV-Agent-debug
-          path: android-project/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14
+          name: tv-agent-apk
+          path: src/app/build/outputs/apk/debug/app-debug.apk
