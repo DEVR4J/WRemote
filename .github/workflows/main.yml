@@ -1,0 +1,27 @@
+name: Build TV APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tv-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unzip project
+        run: unzip -q -o tv-app.zip -d src
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.7" }
+      - name: Build TV APK
+        run: gradle -p src assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tv-agent-apk
+          path: src/app/build/outputs/apk/debug/app-debug.apk
