@@ -20,7 +20,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: "8.7" }
       - name: Build TV APK
-        run: gradle -p src assembleDebug --no-daemon
+        run: |
+          set -o pipefail
+          gradle -p src assembleDebug --no-daemon --console=plain 2>&1 | tee build.log
+      - name: Show compile errors
+        if: failure()
+        run: |
+          grep -E "^e: |error:" build.log | head -40 || true
       - uses: actions/upload-artifact@v4
         with:
           name: tv-agent-apk
